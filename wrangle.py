@@ -24,7 +24,7 @@ def zillow(database='zillow',user=env.user, password=env.password, host=env.host
         zillow = pd.read_csv('zillow.csv', index_col=0)
     else:
         print('No file exists, extracting from MySQL.')
-        query = '''select ta.*, tb.logerror, tb.transactiondate, act.airconditioningdesc, ast.architecturalstyledesc, bct.buildingclassdesc, hst.heatingorsystemdesc,
+        query = '''select ta.*, ta.fips, tb.logerror, tb.transactiondate, act.airconditioningdesc, ast.architecturalstyledesc, bct.buildingclassdesc, hst.heatingorsystemdesc,
                     plt.propertylandusedesc, st.storydesc, tct.typeconstructiondesc
                     from properties_2017 ta
                     inner join (select parcelid from properties_2017
@@ -40,13 +40,23 @@ def zillow(database='zillow',user=env.user, password=env.password, host=env.host
                     left join typeconstructiontype as tct on ta.typeconstructiontypeid = tct.typeconstructiontypeid
                     WHERE ta.bedroomcnt | ta.bathroomcnt != 0
                     AND ta.latitude & ta.longitude IS NOT NULL
-                    AND ta.propertylandusetypeid = 261;'''
+                    AND ta.propertylandusetypeid = 261
+                    AND tb.logerror IS NOT NULL;'''
 
         connection = f'mysql+pymysql://{user}:{password}@{host}/{database}'
         zillow = pd.read_sql(query, connection)
 
+        # Renaming fips and other columns
+        zillow = zillow.rename(columns={'fips':'county', 'taxvaluedollarcnt':'tax_value','calculatedfinishedsquarefeet':'sq_feet'})
+        # drop duplicate columns
+        zillow = zillow.loc[:,~zillow.columns.duplicated()].copy()
+        # assigning values to associated codes for fips/county
+        zillow['county'] = zillow['county'].map({6037:'LA',6059:'Orange',6111:'Ventura'})
+
+        # dropping duplicate houses -- on the latest transaction date to determine which to keep
+        zillow = zillow.sort_values('transactiondate').drop_duplicates('parcelid',keep='last')
         # dropping extra columns
-        zillow.drop(columns=['id'],inplace=True)
+        zillow.drop(columns=['id','parcelid'],inplace=True)
         # cache data
         zillow.to_csv('zillow.csv')
     return zillow
@@ -197,3 +207,4 @@ def handle_missing_values(df, column_percent=.6, row_percent=.6):
     df.dropna(thresh=row_limit,axis=0,inplace=True)
 
     return df
+
